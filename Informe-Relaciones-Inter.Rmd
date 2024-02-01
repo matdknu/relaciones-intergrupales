@@ -1,0 +1,402 @@
+---
+title: "Relaciones Intergrupales"
+author: "Matías Deneken & Roberto González"
+date: "2024-01-31"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+## Introducción
+
+```{r,  echo=FALSE, message=FALSE}
+
+rm(list=ls()) 
+
+ola4 <- readRDS("D:/Dropbox/CIIR/Encuesta-ELRI/BBDD//BBDD ELRI HOMOLOGADA 4.0 LONG.rds")
+
+
+## Carga de paquetes --------------------
+pacman::p_load(car,
+               dplyr,
+               panelr,
+               stringr,
+               tidyverse,#ggplot, dplyer, stringr
+               ggplot2,
+               survey,
+               ggrepel,
+               na.tools,
+               haven,
+               sjmisc)
+
+
+ola4 <- ola4 %>% 
+  select( folio,
+          tipo_participante, 
+          a1, 
+          c2, #Confía no indígenas
+          c5, #Confía indígenas
+          #c7_1, #Amigos chilenos no indígenas
+          c7_2, #Con que frecuencia conversa con No Indígenas.
+          c7_3, #Cuan amistosa
+          c13, #Con que frecuencia conversa con PP.00
+          c14, #amistosa
+          m, ano, 
+          c26_1, #Mis familia valora que tenga amistades chilenas no índigenas
+          c26_2, #Mis amigos valoran que tenga amistades indígenas
+          c26_3, #Mis amigos (% PUEBLO ORIGINARIO) valoran que yo tenga amigos chilenos no indígenas
+          c26_4, #Mis amigos chilenos no indígenas valoran que yo tenga amigos  (% PUEBLO ORIGINARIO)?
+          c12, pond) %>%  mutate(tipo_participante = as.factor(tipo_participante))
+
+```
+
+A solicitud, y con el fin de comparar los resultados existentes en ELSOC, se procedió a describir el efecto de frecuencia en la confianza hacia chilenos no indígenas; a la vez que se comparó las normas pro-contacto de familia sobre el contacto con chilenos no indígenas.
+
+Para ello se trabajó con la siguientes variables de interés:
+
+-   `ano`
+-   `tipo_particiante`. Si es panel o refresco.
+-   `pond` Ponderador
+-   `a1` Pertenecia a pueblo originario y fue recodificada con la variable `es_indígena`, donde `1` es `ser indígena` mientras `2` `es ser no indígena`
+-   `c2`. Confianza en chilenos no indígenas.
+-   `c5`. Confianza en indígenas.
+-   `c7_1` Amigos chilenos no indígenas.
+-   `c7_2` Con que frecuencia conversa con No Indígenas
+-   `c7_3` Cuan amistosa fue la conversación con no indígenas.
+-   `c26_1` Mis familia valoran que tenga amistades chilenas no índigenas
+-   `c26_2` Mis amigos valoran que tenga amistades indígenas
+-   `c26_3` Mis amigos (% PUEBLO ORIGINARIO) valoran que yo tenga amigos chilenos no indígenas
+-   `c26_4` Mis amigos chilenos no indígenas valoran que yo tenga amigos (% PUEBLO ORIGINARIO)?
+-   `c12` Frecuencia de interacción con PP.OO
+
+## Procesamiento.
+
+Existe una complejida en ELRI que merece ser señalada. La variable `c26_4` que señala *mis amigos chilenos no indígenas valoran que yo tenga amigos (% PUEBLO ORIGINARIO)?* se dejó de preguntar en el año 2018, porque le pierde su carácter longitudinal en la encuesta. En otras palabras, no existen datos para el año 2021 y 2023.
+
+En primer lugar, crearemos la variable de si es indígena o no es indígena.
+
+```{r}
+ola4 <- ola4 %>% mutate(indigena_es = case_when(
+  a1 >= 12 ~ 1,  #Es indígena
+  a1 <= 12   ~ 2))
+```
+
+En segunda lugar se realizará un código que recodifique y etiquete las variables de interés.
+
+```{r}
+ola4_cod <- ola4 %>%
+  #filter(tipo_participante == 1 | tipo_participante == 2) %>% 
+  #filter(indigena_es == 2) %>% Aquí podemos filtrar únicamente para indígenas. 
+  mutate(norma_pro_noindigena = case_when(
+    as.numeric(c26_2) + as.numeric(c26_3) <= 4 ~ 1,
+    as.numeric(c26_2) + as.numeric(c26_3) <= 7 ~ 2,
+    as.numeric(c26_2) + as.numeric(c26_3) <= 10 ~ 3,
+    TRUE ~ NA
+  ),
+  norma_pro_indigena = case_when(
+    as.numeric(c26_1) <= 2 ~ 1,
+    as.numeric(c26_1) == 3 ~ 2,
+    as.numeric(c26_1) >= 4 ~ 3,
+    TRUE ~ NA
+  ),
+  confia_en_noindigenas = ifelse(c2 %in% c(88, 99, 8888, 9999), NA, c2),
+  confia_en_noindigenas_cod = factor(case_when(
+    c2 == 1 | c2 == 2  ~ 1, c2 == 3 ~ 2 , c2 == 4 | c2 == 5 ~ 3),
+    labels = c('Baja confianza', 'Media confianza', 'Alta confianza')),
+    confia_en_noindigenas_cod2 = factor(case_when(
+    c2 == 1 | c2 == 2  ~ 1, c2 == 3 ~ 2 ,
+    c2 == 4 | c2 == 5 ~ 2),#Se codifca según no confianza,confianza. 
+    labels = c('No confianza','Confianza')),
+  confia_en_indigenas = ifelse(c5 %in% c(88, 99, 8888, 9999), NA, c5),
+   confia_en_indigenas_cod = factor(case_when(
+    c5 == 1 | c5 == 2  ~ 1, c5 == 3 ~ 2 , c5 == 4 | c2 == 5 ~ 3 ,
+    TRUE ~ NA),
+    labels = c('Baja confianza', 'Media confianza', 'Alta confianza')),
+  frecuencia_contacto_noindigenas = factor(case_when(
+    c7_2 == 1 | c7_2 == 2  ~ 1, c7_2 == 3 ~ 2 , c7_2 == 4 | c7_2 == 5 ~ 3),
+  labels = c('Contacto Bajo', 'Contacto Medio', 'Contacto Alto')),
+  calidad_contacto_con_noindigenas = factor(case_when(
+    c7_3 == 1 | c7_3 == 2  ~ 1, c7_3 == 3 ~ 2 , c7_3 == 4 | c7_3 == 5 ~ 3),
+    labels = c('Poco amistosa', 'Algo amistosa', 'Amistosa')),
+  calidad_contacto_con_indigenas = factor(case_when(
+    c14 == 1 | c14 == 2  ~ 1, c14 == 3 ~ 2 , c14 == 4 | c14 == 5 ~ 3),
+    labels = c('Poco amistosa', 'Algo amistosa', 'Amistosa')),
+  frecuencia_contacto_indigenas = factor(case_when( c13 == 1 | c13 == 2  ~ 'Contacto Bajo', 
+    c13 == 3 ~ 'Contacto Medio',  c13 == 4 | c13 == 5 ~ 'Contacto Alto'
+  ),
+  labels = c('Contacto Bajo', 'Contacto Medio', 'Contacto Alto'))) %>%
+  select( ano, folio, pond,
+          a1, indigena_es, 
+          c7_2, frecuencia_contacto_noindigenas, 
+          c7_3, calidad_contacto_con_noindigenas ,
+          c14, frecuencia_contacto_indigenas , calidad_contacto_con_indigenas,
+          norma_pro_indigena, c26_1,
+          norma_pro_noindigena, c26_2, c26_3,
+          c2, confia_en_noindigenas, confia_en_noindigenas_cod, confia_en_noindigenas_cod2, 
+          c5 , confia_en_indigenas, confia_en_indigenas_cod)
+
+```
+
+## Diseño ponderado complejo y procesamiento descriptivo.
+
+El tercer paso es convertir la base de datos `ola4_cod` en su naturaleza de diseño complejo, ELRI solo trabaja con el poderador y utiliza estratificador.
+
+```{r}
+ola4svy <-  srvyr::as_survey_design(ola4_cod,
+                                 ids = folio,
+                                 strata = NULL,
+                                 weights = pond)
+```
+
+### Frecuencia de contacto y su efecto en la confianza.
+
+Si evidenciamos la *confianza en chilenos no indígenas*, , por parte de los indígenas, cruzando por la frecuencia de contacto obtenemos los siguientes resultados.
+
+```{r, echo=FALSE}
+
+confianza_contacto<- data.frame((svytable(~confia_en_noindigenas_cod +  frecuencia_contacto_noindigenas + indigena_es + ano , ola4svy, 
+                                      round = F))) %>% group_by(ano) %>% filter(indigena_es == 1, confia_en_noindigenas_cod == 'Alta confianza' )%>% 
+  mutate(percentage=Freq/sum(Freq))
+
+g <- confianza_contacto  %>% 
+  ggplot(aes(y = percentage, x =  as.factor(ano) , fill = as.factor(frecuencia_contacto_noindigenas), 
+             label = as.character(scales::percent(percentage, accuracy = .04)))) + 
+  theme_bw() + 
+  geom_col(position = 'Dodge') +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0, 1)) +
+  ylab(label = "Grados de Confianza") +
+  xlab(label = "Año") +
+  scale_fill_viridis_d(begin = 0, end = .85, direction = -1, option = 'plasma') +
+  theme(legend.position = 'top',
+        axis.text = element_text(size=14),
+        panel.border = element_rect(fill = "transparent"),
+        legend.title = element_blank()) +
+  geom_text(vjust = -0.8,
+            position = position_dodge(width = .9),
+            size= 2.75) + 
+  labs(
+    title = "% Efecto de Frecuencia de contacto en confianza hacia no indígenas.",
+    subtitle = "Digregado por año y filtrado por <Alta Confianza>",
+    caption = "Encuesta Longitudinal de Relaciones Interculturales (ELRI)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 11, margin = margin(b = 15)),
+    plot.subtitle = element_text(hjust = 0.5, size = 8, margin = margin(b = 15))
+  )
+
+g
+```
+
+Si evidenciamos la *confianza en indígenas*, , por parte de los chilenos no indígenas, cruzando por la frecuencia de contacto obtenemos los siguientes resultados.
+
+```{r, echo=FALSE}
+
+confianza_contacto<- data.frame((svytable(~confia_en_indigenas_cod +  frecuencia_contacto_indigenas + indigena_es + ano , ola4svy, round = F))) %>% group_by(ano) %>% filter(indigena_es == 2, confia_en_indigenas_cod == 'Alta confianza' )%>% 
+  mutate(percentage=Freq/sum(Freq))
+
+g <- confianza_contacto  %>% 
+  ggplot(aes(y = percentage, x =  as.factor(ano) , fill = as.factor(frecuencia_contacto_indigenas), 
+             label = as.character(scales::percent(percentage, accuracy = .04)))) + 
+  theme_bw() + 
+  geom_col(position = 'Dodge') +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0, 1)) +
+  ylab(label = "Grados de Confianza") +
+  xlab(label = "Año") +
+  scale_fill_viridis_d(begin = 0, end = .85, direction = -1, option = 'plasma') +
+  theme(legend.position = 'top',
+        axis.text = element_text(size=14),
+        panel.border = element_rect(fill = "transparent"),
+        legend.title = element_blank()) +
+  geom_text(vjust = -0.8,
+            position = position_dodge(width = .9),
+            size= 2.75) + 
+  labs(
+    title = "% Efecto de Frecuencia de contacto en confianza hacia indígenas.",
+    subtitle = "Digregado por año y filtrado por <Alta Confianza>",
+    caption = "Encuesta Longitudinal de Relaciones Interculturales (ELRI)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 11, margin = margin(b = 15)),
+    plot.subtitle = element_text(hjust = 0.5, size = 8, margin = margin(b = 15))
+  )
+
+g
+```
+
+El grafico nos demuestra que para el año 2016 y 2023, las personas con bajo contacto tiene un mayor grado de confianza. Mientras que para el 2018 y 2022, lo que poseen un contacto alto poseen un mayor grado de confianza.
+
+### Norma pro contacto y su efecto en la confianza.
+
+Las norma pro contacto de indígenas hacia no indígenas demuestra los siguientes resultados. Resulta interesante destacar que los valores del 2016 son semejantes a los valores del 2023, lo que refleja una caída posterior al proceso constituyente.
+
+```{r,echo=FALSE}
+normas_contacto_con_noindigena <- ola4svy  %>% filter(frecuencia_contacto_noindigenas == 'Contacto Alto', indigena_es == 1 ) %>% group_by(indigena_es,
+                                    norma_pro_noindigena, #Confianza chilenos no indígenas                    
+                                    frecuencia_contacto_noindigenas,ano) %>% 
+  summarise(count = n()) %>% 
+  mutate(percentage = (count / sum(count)) * 1) %>% drop_na()
+
+
+normas_contacto_con_noindigena <- data.frame((svytable(~norma_pro_noindigena +  frecuencia_contacto_noindigenas + indigena_es + ano , ola4svy,  round = F))) %>% group_by(ano) %>% filter(indigena_es == 1, frecuencia_contacto_noindigenas == "Contacto Alto" )%>% 
+  mutate(percentage=Freq/sum(Freq))
+
+
+g<- normas_contacto_con_noindigena   %>% 
+  ggplot(aes(y = percentage, x =  as.factor(ano) , fill = as.factor(norma_pro_noindigena), 
+             label = as.character(scales::percent(percentage, accuracy = .04)))) + 
+  theme_bw() + 
+  geom_col(position = 'Dodge') +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0, 1)) +
+  ylab(label = "Frecuencia de Contacto") +
+  xlab(label = "Año") +
+  scale_fill_viridis_d(begin = 0, end = .85, direction = -1, option = 'plasma') +
+  theme(legend.position = 'top',
+        axis.text = element_text(size=14),
+        panel.border = element_rect(fill = "transparent"),
+        legend.title = element_blank()) +
+  geom_text(vjust = -0.8,
+            position = position_dodge(width = .9),
+            size= 2.75) + 
+  labs(
+    title = "% Efecto de normas de contacto y su efecto en frecuencia de contacto en personas indígenas",
+    subtitle = "Digregado por año y filtrado por <Contacto Alto>",
+    caption = "Encuesta Longitudinal de Relaciones Interculturales (ELRI)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 10, margin = margin(b = 15)),
+    plot.subtitle = element_text(hjust = 0.5, size = 8, margin = margin(b = 15))
+  ) 
+
+g
+
+```
+
+```{r,echo=FALSE}
+
+confianza_contacto <- data.frame((svytable(~frecuencia_contacto_indigenas +  norma_pro_indigena + indigena_es + ano , ola4svy, 
+                                      round = F))) %>% group_by(ano) %>% filter(indigena_es == 2, frecuencia_contacto_indigenas == 'Contacto Alto' )%>% 
+  mutate(percentage=Freq/sum(Freq))
+
+g <- confianza_contacto  %>% 
+  ggplot(aes(y = percentage, x =  as.factor(ano) , fill = as.factor(norma_pro_indigena), 
+             label = as.character(scales::percent(percentage, accuracy = .04)))) + 
+  theme_bw() + 
+  geom_col(position = 'Dodge') +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0, 1)) +
+  ylab(label = "Frecuencia contacto indígenas") +
+  xlab(label = "Año") +
+  scale_fill_viridis_d(begin = 0, end = .85, direction = -1, option = 'plasma') +
+  theme(legend.position = 'top',
+        axis.text = element_text(size=14),
+        panel.border = element_rect(fill = "transparent"),
+        legend.title = element_blank()) +
+  geom_text(vjust = -0.8,
+            position = position_dodge(width = .9),
+            size= 2.75) + 
+  labs(
+    title = "% Efecto de Frecuencia de contacto en confianza hacia  indígenas.",
+    subtitle = "Digregado por año y filtrado por <Alta Confianza>",
+    caption = "Encuesta Longitudinal de Relaciones Interculturales (ELRI)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 11, margin = margin(b = 15)),
+    plot.subtitle = element_text(hjust = 0.5, size = 8, margin = margin(b = 15))
+  )
+
+
+g
+```
+
+## Calidad de contacto.
+
+La calidad de contacto según la norma.
+
+```{r, echo=FALSE}
+
+
+contacto_amistosa <- data.frame((svytable(~calidad_contacto_con_noindigenas +  norma_pro_noindigena + indigena_es + ano , ola4svy, 
+                                      round = F))) %>% group_by(ano) %>% filter(indigena_es == 1, calidad_contacto_con_noindigenas == 'Amistosa' )%>% 
+  mutate(percentage=Freq/sum(Freq))
+
+
+
+## Gráfico. 
+
+g<- contacto_amistosa   %>% 
+  ggplot(aes(y = percentage, x =  as.factor(ano) , fill = as.factor(norma_pro_noindigena), 
+             label = as.character(scales::percent(percentage, accuracy = .04)))) + 
+  theme_bw() + 
+  geom_col(position = 'Dodge') +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0, 1)) +
+  ylab(label = "Frecuencia de Contacto Amistoso") +
+  xlab(label = "Año") +
+  scale_fill_viridis_d(begin = 0, end = .85, direction = -1, option = 'plasma') +
+  theme(legend.position = 'top',
+        axis.text = element_text(size=14),
+        panel.border = element_rect(fill = "transparent"),
+        legend.title = element_blank()) +
+  geom_text(vjust = -0.8,
+            position = position_dodge(width = .9),
+            size= 2.75) + 
+  labs(
+    title = "Normas de contacto y percepción del contacto",
+    subtitle = "Digregado por año y filtrado por <Contacto Amistoso>",
+    caption = "Encuesta Longitudinal de Relaciones Interculturales (ELRI)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 12, margin = margin(b = 15)),
+    plot.subtitle = element_text(hjust = 0.5, size = 8, margin = margin(b = 15))
+  ) ; g
+
+
+```
+
+```{r, echo=FALSE}
+contacto_amistosa <- data.frame((svytable(~calidad_contacto_con_indigenas +  norma_pro_indigena + indigena_es + ano , ola4svy, round = F))) %>% group_by(ano) %>% filter(indigena_es == 2, calidad_contacto_con_indigenas == 'Amistosa' )%>% 
+  mutate(percentage=Freq/sum(Freq))
+
+
+
+## Gráfico. 
+
+g<- contacto_amistosa   %>% 
+  ggplot(aes(y = percentage, x =  as.factor(ano) , fill = as.factor(norma_pro_indigena), 
+             label = as.character(scales::percent(percentage, accuracy = .04)))) + 
+  theme_bw() + 
+  geom_col(position = 'Dodge') +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0, 1)) +
+  ylab(label = "Frecuencia de Contacto Amistoso") +
+  xlab(label = "Año") +
+  scale_fill_viridis_d(begin = 0, end = .85, direction = -1, option = 'plasma') +
+  theme(legend.position = 'top',
+        axis.text = element_text(size=14),
+        panel.border = element_rect(fill = "transparent"),
+        legend.title = element_blank()) +
+  geom_text(vjust = -0.8,
+            position = position_dodge(width = .9),
+            size= 2.75) + 
+  labs(
+    title = "Normas de contacto y percepción del contacto",
+    subtitle = "Digregado por año y filtrado por <Contacto Amistoso>",
+    caption = "Encuesta Longitudinal de Relaciones Interculturales (ELRI)"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 12, margin = margin(b = 15)),
+    plot.subtitle = element_text(hjust = 0.5, size = 8, margin = margin(b = 15))
+  ) 
+
+g
+
+
+```
+
+El gráfico demuestra que las normas procontacto son fundamentales para la calidad del contacto percibido.
+
+## Comentario finales
